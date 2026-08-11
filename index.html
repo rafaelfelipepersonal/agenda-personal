@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Agenda • Personal Trainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  :root{
+    --bg:#12151A;
+    --surface:#1B2027;
+    --surface-2:#232A32;
+    --line:#2B333C;
+    --lime:#C9FF3D;
+    --lime-dim:#7C9A2A;
+    --coral:#FF5D5D;
+    --coral-dim:#5A2B2B;
+    --text:#F2F3F0;
+    --muted:#8A9099;
+    --radius:16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:'Inter',system-ui,-apple-system,sans-serif; height:100%;
+    -webkit-font-smoothing:antialiased;}
+  .display{font-family:'Bebas Neue',sans-serif; letter-spacing:0.5px;}
+  #app{max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column;
+    padding-bottom:78px; position:relative;}
+
+  /* HEADER */
+  header{padding:22px 20px 14px;}
+  header .eyebrow{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:2px;}
+  header h1{font-size:34px; margin:0; line-height:1;}
+  header h1 span{color:var(--lime);}
+
+  /* TRACK / TIMELINE (signature element) */
+  .track-wrap{margin:18px 20px 8px; background:var(--surface); border-radius:var(--radius); padding:16px;}
+  .track-title{font-size:13px; color:var(--muted); margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;}
+  .track-nav{display:flex; gap:6px;}
+  .track-title button, .track-nav button{background:none; border:1px solid var(--line); color:var(--text); border-radius:8px;
+    padding:4px 10px; font-size:12px; font-family:inherit;}
+  .track-nav button#todayDayBtn{color:var(--muted);}
+  .track{position:relative; display:flex; align-items:stretch; gap:0; overflow-x:auto; padding-bottom:6px;}
+  .seg{flex:0 0 auto; min-width:76px; padding:10px 8px; border-radius:10px; margin-right:6px; position:relative;}
+  .seg.aula{background:rgba(201,255,61,0.12); border:1px solid var(--lime-dim);}
+  .seg.deslocamento{background:transparent; border:1px dashed var(--line); display:flex; align-items:center; justify-content:center; min-width:44px;}
+  .seg.deslocamento .t{font-size:11px; color:var(--muted); writing-mode:horizontal-tb;}
+  .seg .name{font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;}
+  .seg .time{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .empty-track{font-size:13px; color:var(--muted); padding:20px 0; text-align:center;}
+
+  /* TABS CONTENT */
+  main{flex:1; padding:4px 20px 20px;}
+  .section-title{font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; margin:22px 0 10px;}
+
+  /* DAY PICKER (agenda) */
+  .day-picker{display:flex; gap:6px; overflow-x:auto; padding:4px 0 14px; margin-bottom:4px;}
+  .day-pill{flex:0 0 auto; padding:8px 14px; border-radius:20px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--muted); font-family:inherit; font-size:13px; font-weight:600;}
+  .day-pill.active{background:var(--lime); color:#12151A; border-color:var(--lime);}
+
+  .card{background:var(--surface); border-radius:var(--radius); padding:16px; margin-bottom:10px;
+    border:1px solid var(--line);}
+  .card.overdue{border-color:var(--coral); background:linear-gradient(180deg, rgba(255,93,93,0.08), var(--surface));}
+  .row{display:flex; justify-content:space-between; align-items:center;}
+  .aluno-nome{font-size:16px; font-weight:700;}
+  .aluno-meta{font-size:12.5px; color:var(--muted); margin-top:3px;}
+  .badge{font-size:11px; padding:3px 9px; border-radius:20px; font-weight:600; white-space:nowrap;}
+  .badge.ok{background:rgba(201,255,61,0.15); color:var(--lime);}
+  .badge.warn{background:rgba(255,193,61,0.15); color:#FFC13D;}
+  .badge.late{background:rgba(255,93,93,0.18); color:var(--coral);}
+  .card-actions{display:flex; gap:8px; margin-top:12px;}
+  .card-actions button{flex:1; padding:9px; border-radius:9px; border:none; font-family:inherit;
+    font-size:12.5px; font-weight:600;}
+  .btn-ghost{background:var(--surface-2); color:var(--text);}
+  .btn-lime{background:var(--lime); color:#12151A;}
+  .btn-del{background:transparent; color:var(--coral); border:1px solid var(--coral-dim) !important;}
+
+  /* FORMS */
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:5px;}
+  .field input, .field select{width:100%; background:var(--surface-2); border:1px solid var(--line);
+    color:var(--text); padding:11px 12px; border-radius:10px; font-family:inherit; font-size:14.5px;}
+  .field input:focus, .field select:focus{outline:none; border-color:var(--lime);}
+  .field-row{display:flex; gap:10px;}
+  .field-row .field{flex:1;}
+  .aulas-list{display:flex; flex-direction:column; gap:8px; margin-bottom:6px;}
+  .aula-row{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:10px 10px 2px;}
+  .aula-row .field-row{align-items:flex-end;}
+  .aula-row .field{margin-bottom:10px;}
+  .aula-row select, .aula-row input{background:var(--surface); font-size:13.5px; padding:9px 10px;}
+  .btn-remove-aula{background:none; border:none; color:var(--coral); font-size:18px; line-height:1;
+    padding:9px 4px; margin-bottom:10px;}
+  .btn-add-aula{width:100%; background:none; border:1px dashed var(--line); color:var(--lime);
+    border-radius:10px; padding:10px; font-family:inherit; font-size:13px; font-weight:600; margin-bottom:14px;}
+  .primary-btn{width:100%; background:var(--lime); color:#12151A; border:none; padding:14px;
+    border-radius:12px; font-family:inherit; font-weight:800; font-size:15px; margin-top:6px;}
+  .primary-btn:disabled{opacity:0.5;}
+  .status-line{font-size:12.5px; color:var(--muted); margin-top:8px; min-height:16px;}
+  .status-line.err{color:var(--coral);}
+  .status-line.ok{color:var(--lime);}
+  .status-line.warn{color:#FFC13D;}
+
+  .fab{position:fixed; right:calc(50% - 240px + 20px); bottom:92px; width:52px; height:52px; border-radius:50%;
+    background:var(--lime); color:#12151A; font-size:26px; border:none; box-shadow:0 6px 18px rgba(201,255,61,0.35);
+    display:flex; align-items:center; justify-content:center; z-index:20;}
+  @media (max-width:520px){ .fab{right:20px;} }
+
+  /* MODAL */
+  .modal-bg{position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:flex-end; z-index:40;}
+  .modal-bg.open{display:flex;}
+  .modal{background:var(--bg); width:100%; max-width:480px; margin:0 auto; border-radius:20px 20px 0 0;
+    padding:20px 20px calc(24px + env(safe-area-inset-bottom)); max-height:88vh; overflow-y:auto;}
+  .modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;}
+  .modal-head h2{font-size:20px; margin:0;}
+  .modal-head button{background:none; border:none; color:var(--muted); font-size:22px;}
+
+  /* TAB BAR */
+  nav.tabbar{position:fixed; bottom:0; left:0; right:0; background:rgba(27,32,39,0.92); backdrop-filter:blur(14px);
+    border-top:1px solid var(--line); display:flex; padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    z-index:30;}
+  nav.tabbar .tabwrap{max-width:480px; margin:0 auto; display:flex; width:100%;}
+  nav.tabbar button{flex:1; background:none; border:none; color:var(--muted); font-family:inherit;
+    font-size:11px; padding:6px 0; display:flex; flex-direction:column; align-items:center; gap:3px;}
+  nav.tabbar button .ic{font-size:19px;}
+  nav.tabbar button.active{color:var(--lime);}
+
+  .setup-banner{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px;
+    font-size:12.5px; color:var(--muted); margin:0 20px 10px;}
+  .setup-banner b{color:var(--text);}
+  ::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="eyebrow" id="dateLabel">Hoje</div>
+    <h1 class="display" id="tabHeading">Agenda<span>.</span></h1>
+  </header>
+
+  <div class="track-wrap">
+    <div class="track-title">
+      <span id="trackDayLabel">Trilha do dia</span>
+      <div class="track-nav">
+        <button id="prevDayBtn" title="Dia anterior">←</button>
+        <button id="todayDayBtn" title="Voltar para hoje">Hoje</button>
+        <button id="nextDayBtn" title="Próximo dia">→</button>
+      </div>
+    </div>
+    <div class="track" id="trackEl"><div class="empty-track">Cadastre um aluno para ver a trilha do dia.</div></div>
+  </div>
+
+  <div class="setup-banner" id="setupBanner" style="display:none;">
+    ⚙️ <b>Configuração pendente:</b> cole sua config do Firebase no topo do arquivo (procure por <code>FIREBASE_CONFIG</code>) para os dados salvarem de verdade. Por enquanto está tudo rodando só nesta sessão.
+  </div>
+
+  <main id="mainArea"></main>
+</div>
+
+<button class="fab" id="fabBtn">+</button>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalBody"></div>
+</div>
+
+<nav class="tabbar">
+  <div class="tabwrap">
+    <button class="tab-btn active" data-tab="agenda"><span class="ic">📅</span>Agenda</button>
+    <button class="tab-btn" data-tab="consulta"><span class="ic">🔍</span>Consulta</button>
+    <button class="tab-btn" data-tab="alunos"><span class="ic">🧍</span>Alunos</button>
+    <button class="tab-btn" data-tab="pagamentos"><span class="ic">💳</span>Pagamentos</button>
+  </div>
+</nav>
+
+<script>
+/* ======================= CONFIG ======================= */
+// Cole aqui a config do SEU projeto Firebase (a mesma estrutura usada no
+// organizador financeiro / de viagem). Enquanto não colar, o app funciona
+// só em memória (os dados somem ao recarregar a página).
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBbRbsZSFhb9XH_fL2kEQ0xEP_v9GBwUFA",
+  authDomain: "agenda-personal-f23ea.firebaseapp.com",
+  projectId: "agenda-personal-f23ea",
+  storageBucket: "agenda-personal-f23ea.firebasestorage.app",
+  messagingSenderId: "156864022817",
+  appId: "1:156864022817:web:fb272df9b27aa56535d660"
+};
+
+let db = null;
+let usingFirebase = false;
+try{
+  if(FIREBASE_CONFIG.apiKey){
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    usingFirebase = true;
+  }
+}catch(e){ console.warn('Firebase não configurado ainda.', e); }
+
+document.getElementById('setupBanner').style.display = usingFirebase ? 'none' : 'block';
+
+/* ======================= STATE ======================= */
+const DIAS = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+let alunos = []; // {id, nome, endereco, lat, lng, aulas:[{dia(0-6), horario('HH:MM'), duracaoMin}], valor, diaVencimento, ultimoPagamento}
+let currentTab = 'agenda';
+let trackDayOffset = 0; // 0 = hoje
+let agendaDia = new Date().getDay(); // dia da semana (0-6) exibido na aba Agenda
+
+const uid = () => Math.random().toString(36).slice(2,10);
+
+/* ======================= PERSISTENCE ======================= */
+async function loadAlunos(){
+  if(usingFirebase){
+    const snap = await db.collection('alunos').get();
+    alunos = snap.docs.map(d => ({...d.data(), id:d.id}));
+  }
+  render();
+}
+async function saveAluno(aluno){
+  if(usingFirebase){
+    const {id, ...dados} = aluno; // nunca gravar 'id' como campo dentro do documento — ele é o próprio ID do doc
+    if(id && alunos.find(a=>a.id===id)){
+      await db.collection('alunos').doc(id).set(dados);
+      aluno.id = id;
+    } else {
+      const ref = await db.collection('alunos').add(dados);
+      aluno.id = ref.id;
+    }
+  } else if(!aluno.id){
+    aluno.id = uid();
+  }
+  const idx = alunos.findIndex(a=>a.id===aluno.id);
+  if(idx>=0) alunos[idx]=aluno; else alunos.push(aluno);
+}
+async function deleteAluno(id){
+  if(usingFirebase) await db.collection('alunos').doc(id).delete();
+  alunos = alunos.filter(a=>a.id!==id);
+}
+async function marcarPago(aluno){
+  aluno.ultimoPagamento = new Date().toISOString().slice(0,10);
+  const salvouATempo = await Promise.race([
+    saveAluno(aluno).then(()=>true),
+    new Promise(resolve=>setTimeout(()=>resolve('timeout'), 10000))
+  ]);
+  if(salvouATempo==='timeout'){
+    throw new Error('Tempo esgotado ao salvar no Firestore (10s). Confira as regras de segurança do Firestore ou a conexão.');
+  }
+  render();
+}
+
+/* ======================= GEO / OSRM (gratuito, sem chave) ======================= */
+// Nominatim (OpenStreetMap) para geocodificar endereço -> lat/lng
+async function geocode(endereco){
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(endereco)}`;
+  try{
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), 8000);
+    const res = await fetch(url, {headers:{'Accept-Language':'pt-BR'}, signal: controller.signal});
+    clearTimeout(timeoutId);
+    if(!res.ok){ console.error('Geocode: resposta não-ok', res.status); return null; }
+    const data = await res.json();
+    if(!data.length) return null;
+    return {lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon)};
+  }catch(err){
+    console.error('Geocode falhou:', err);
+    return null;
+  }
+}
+// OSRM público para tempo/distância de carro entre dois pontos
+async function tempoDeslocamento(origem, destino){
+  if(!origem || !destino) return null;
+  const url = `https://router.project-osrm.org/route/v1/driving/${origem.lng},${origem.lat};${destino.lng},${destino.lat}?overview=false`;
+  try{
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), 8000);
+    const res = await fetch(url, {signal: controller.signal});
+    clearTimeout(timeoutId);
+    if(!res.ok){ console.error('OSRM: resposta não-ok', res.status); return null; }
+    const data = await res.json();
+    if(data.code !== 'Ok') return null;
+    const r = data.routes[0];
+    return {minutos: Math.round(r.duration/60), km: (r.distance/1000).toFixed(1)};
+  }catch(err){
+    console.error('Cálculo de trajeto falhou:', err);
+    return null;
+  }
+}
+function getCurrentPosition(){
+  return new Promise((resolve)=>{
+    if(!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({lat:p.coords.latitude, lng:p.coords.longitude}),
+      () => resolve(null),
+      {timeout:6000}
+    );
+  });
+}
+
+/* ======================= HELPERS ======================= */
+function minutosParaHora(min){
+  const h = Math.floor(min/60).toString().padStart(2,'0');
+  const m = (min%60).toString().padStart(2,'0');
+  return `${h}:${m}`;
+}
+function horaParaMinutos(hhmm){
+  const [h,m] = hhmm.split(':').map(Number);
+  return h*60+m;
+}
+// Normaliza as aulas de um aluno. Suporta o formato novo (aluno.aulas = [{dia,horario,duracaoMin}])
+// e mantém compatibilidade com cadastros antigos que tinham só um dia/horário fixo.
+function getAulas(aluno){
+  if(Array.isArray(aluno.aulas) && aluno.aulas.length){
+    return aluno.aulas.map(x=>({dia:Number(x.dia), horario:x.horario, duracaoMin:Number(x.duracaoMin||60)}));
+  }
+  if(aluno.diaSemana!==undefined && aluno.horario){
+    return [{dia:Number(aluno.diaSemana), horario:aluno.horario, duracaoMin:Number(aluno.duracaoMin||60)}];
+  }
+  return [];
+}
+// Retorna as sessões (aula + aluno) que caem num dia da semana específico, ordenadas por horário.
+function sessoesDoDia(diaSemana){
+  const out = [];
+  alunos.forEach(a=>{
+    getAulas(a).forEach(aula=>{
+      if(aula.dia===diaSemana) out.push({aluno:a, horario:aula.horario, duracaoMin:aula.duracaoMin});
+    });
+  });
+  return out.sort((x,y)=>horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
+}
+function proximoVencimento(aluno){
+  const hoje = new Date();
+  const diaV = Number(aluno.diaVencimento||10);
+  let venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaV);
+  const ultimo = aluno.ultimoPagamento ? new Date(aluno.ultimoPagamento+'T00:00:00') : null;
+  if(ultimo && ultimo.getMonth()===hoje.getMonth() && ultimo.getFullYear()===hoje.getFullYear() && ultimo.getDate()>=diaV-2){
+    venc = new Date(hoje.getFullYear(), hoje.getMonth()+1, diaV);
+  } else if(hoje.getDate() > diaV && !(ultimo && ultimo >= venc)){
+    // já passou o dia esse mês e não tem pagamento cobrindo -> está vencido esse mês mesmo
+  }
+  return venc;
+}
+function statusPagamento(aluno){
+  const venc = proximoVencimento(aluno);
+  const hoje = new Date();
+  const diffDias = Math.round((venc - new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate())) / 86400000);
+  if(diffDias < 0) return {label:`Atrasado ${Math.abs(diffDias)}d`, cls:'late'};
+  if(diffDias <= 3) return {label:diffDias===0?'Vence hoje':`Vence em ${diffDias}d`, cls:'warn'};
+  return {label:`Vence dia ${venc.getDate()}`, cls:'ok'};
+}
+
+/* ======================= RENDER: TRACK ======================= */
+async function renderTrack(){
+  const d = new Date();
+  d.setDate(d.getDate()+trackDayOffset);
+  const diaSemana = d.getDay();
+  document.getElementById('trackDayLabel').textContent =
+    trackDayOffset===0 ? `Hoje · ${DIAS[diaSemana]}` : `${DIAS[diaSemana]} · ${d.toLocaleDateString('pt-BR')}`;
+
+  const lista = sessoesDoDia(diaSemana);
+  const trackEl = document.getElementById('trackEl');
+  if(!lista.length){
+    trackEl.innerHTML = '<div class="empty-track">Nenhuma aula nesse dia.</div>';
+    return;
+  }
+
+  // monta a trilha intercalando aula -> deslocamento -> aula -> ...
+  let html = '';
+  for(let i=0;i<lista.length;i++){
+    const s = lista[i];
+    html += `<div class="seg aula"><div class="name">${s.aluno.nome}</div><div class="time">${s.horario}–${minutosParaHora(horaParaMinutos(s.horario)+s.duracaoMin)}</div></div>`;
+    if(i < lista.length-1){
+      const prox = lista[i+1];
+      let label = '···';
+      if(s.aluno.lat && prox.aluno.lat){
+        const t = await tempoDeslocamento({lat:s.aluno.lat,lng:s.aluno.lng},{lat:prox.aluno.lat,lng:prox.aluno.lng});
+        if(t){
+          const gap = horaParaMinutos(prox.horario) - (horaParaMinutos(s.horario)+s.duracaoMin);
+          const aperta = gap < t.minutos;
+          label = `${t.minutos}min${aperta?' ⚠️':''}`;
+        }
+      }
+      html += `<div class="seg deslocamento"><span class="t">${label}</span></div>`;
+    }
+  }
+  trackEl.innerHTML = html;
+}
+document.getElementById('prevDayBtn').addEventListener('click', ()=>{ trackDayOffset--; renderTrack(); });
+document.getElementById('nextDayBtn').addEventListener('click', ()=>{ trackDayOffset++; renderTrack(); });
+document.getElementById('todayDayBtn').addEventListener('click', ()=>{ trackDayOffset=0; renderTrack(); });
+
+/* ======================= RENDER: TABS ======================= */
+function render(){
+  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'});
+  renderTrack();
+  const main = document.getElementById('mainArea');
+  const heading = document.getElementById('tabHeading');
+
+  if(currentTab==='agenda'){
+    heading.innerHTML = 'Agenda<span>.</span>';
+    if(!alunos.length){
+      main.innerHTML = '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
+    } else {
+      let html = `<div class="day-picker" id="dayPicker">${DIAS.map((d,di)=>
+        `<button type="button" class="day-pill ${di===agendaDia?'active':''}" data-dia="${di}">${d.slice(0,3)}</button>`
+      ).join('')}</div>`;
+
+      const lista = sessoesDoDia(agendaDia);
+      if(!lista.length){
+        html += `<div class="empty-track">Nenhuma aula ${DIAS[agendaDia].toLowerCase()}.</div>`;
+      } else {
+        lista.forEach(s=>{
+          html += `<div class="card"><div class="row">
+            <div><div class="aluno-nome">${s.aluno.nome}</div>
+            <div class="aluno-meta">${s.horario} · ${s.aluno.endereco||'sem endereço'}</div></div>
+          </div></div>`;
+        });
+      }
+      main.innerHTML = html;
+      document.querySelectorAll('.day-pill').forEach(btn=>btn.addEventListener('click', e=>{
+        agendaDia = Number(e.currentTarget.dataset.dia);
+        render();
+      }));
+    }
+  }
+
+  if(currentTab==='alunos'){
+    heading.innerHTML = 'Alunos<span>.</span>';
+    if(!alunos.length){
+      main.innerHTML = '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
+    } else {
+      main.innerHTML = alunos.map(a=>{
+        const aulas = getAulas(a).slice().sort((x,y)=> x.dia-y.dia || horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
+        const resumo = aulas.length
+          ? aulas.map(x=>`${DIAS[x.dia].slice(0,3)} ${x.horario}`).join(' · ')
+          : 'sem aula cadastrada';
+        return `
+        <div class="card">
+          <div class="row">
+            <div><div class="aluno-nome">${a.nome}</div>
+            <div class="aluno-meta">${resumo}</div>
+            <div class="aluno-meta">${a.endereco||'sem endereço'}</div></div>
+          </div>
+          <div class="card-actions">
+            <button class="btn-ghost btn-editar-aluno" data-id="${a.id}">Editar</button>
+            <button class="btn-del btn-excluir-aluno" data-id="${a.id}">Excluir</button>
+          </div>
+        </div>`;
+      }).join('');
+      main.querySelectorAll('.btn-editar-aluno').forEach(btn=>{
+        btn.addEventListener('click', ()=> openForm(btn.dataset.id));
+      });
+      main.querySelectorAll('.btn-excluir-aluno').forEach(btn=>{
+        btn.addEventListener('click', ()=> handleDelete(btn.dataset.id));
+      });
+    }
+  }
+
+  if(currentTab==='consulta'){
+    heading.innerHTML = 'Consulta<span>.</span>';
+    main.innerHTML = `
+      <div class="card">
+        <div class="field"><label>Endereço da academia / condomínio</label>
+          <input id="c_endereco" placeholder="Rua, número, bairro, cidade"></div>
+        <div class="field-row">
+          <div class="field"><label>Dia</label>
+            <select id="c_dia">${DIAS.map((d,di)=>`<option value="${di}" ${di===new Date().getDay()?'selected':''}>${d}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Horário desejado</label><input id="c_horario" type="time" value="17:00"></div>
+        </div>
+        <div class="field"><label>Duração da aula (min)</label><input id="c_duracao" type="number" value="60"></div>
+        <button class="primary-btn" id="consultaBtn">Verificar disponibilidade</button>
+        <div id="consultaResult" style="margin-top:12px;"></div>
+      </div>
+    `;
+    document.getElementById('consultaBtn').addEventListener('click', handleConsultaCheck);
+  }
+
+  if(currentTab==='pagamentos'){
+    heading.innerHTML = 'Pagamentos<span>.</span>';
+    if(!alunos.length){
+      main.innerHTML = '<div class="empty-track">Cadastre alunos para acompanhar pagamentos.</div>';
+    } else {
+      const ordenados = [...alunos].sort((a,b)=>proximoVencimento(a)-proximoVencimento(b));
+      main.innerHTML = ordenados.map(a=>{
+        const st = statusPagamento(a);
+        return `<div class="card ${st.cls==='late'?'overdue':''}">
+          <div class="row">
+            <div><div class="aluno-nome">${a.nome}</div>
+            <div class="aluno-meta">R$ ${Number(a.valor||0).toFixed(2)} · vencimento dia ${a.diaVencimento||10}</div></div>
+            <span class="badge ${st.cls}">${st.label}</span>
+          </div>
+          <div class="card-actions">
+            <button class="btn-lime" onclick="handleMarcarPago('${a.id}', this)">Marcar como pago</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  }
+}
+
+/* ======================= CONSULTA DE DISPONIBILIDADE ======================= */
+window.handleConsultaCheck = async function(){
+  const statusEl = document.getElementById('consultaResult');
+  const btn = document.getElementById('consultaBtn');
+  const endereco = document.getElementById('c_endereco').value.trim();
+  const diaSemana = Number(document.getElementById('c_dia').value);
+  const horario = document.getElementById('c_horario').value;
+  const duracao = Number(document.getElementById('c_duracao').value) || 60;
+
+  if(!endereco || !horario){
+    statusEl.innerHTML = '<div class="status-line err">Preencha o endereço e o horário.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  statusEl.innerHTML = '<div class="status-line">Localizando endereço...</div>';
+
+  const destino = await geocode(endereco);
+  if(!destino){
+    statusEl.innerHTML = '<div class="status-line err">Não consegui localizar esse endereço. Tente ser mais específico (rua, número, bairro, cidade).</div>';
+    btn.disabled = false;
+    return;
+  }
+
+  const inicioNovo = horaParaMinutos(horario);
+  const fimNovo = inicioNovo + duracao;
+  const lista = sessoesDoDia(diaSemana);
+
+  // conflito direto: já existe aula que bate em cima do horário pedido
+  const conflito = lista.find(s=>{
+    const ini = horaParaMinutos(s.horario);
+    const fim = ini + s.duracaoMin;
+    return inicioNovo < fim && fimNovo > ini;
+  });
+  if(conflito){
+    statusEl.innerHTML = `<div class="status-line err" style="font-weight:700;">❌ Não dá — já tem aula com ${conflito.aluno.nome} nesse horário (${conflito.horario}).</div>`;
+    btn.disabled = false;
+    return;
+  }
+
+  // acha a aula imediatamente anterior e a imediatamente posterior ao horário pedido, no mesmo dia
+  let anterior = null, proxima = null;
+  lista.forEach(s=>{
+    const ini = horaParaMinutos(s.horario);
+    const fim = ini + s.duracaoMin;
+    if(fim <= inicioNovo && (!anterior || fim > horaParaMinutos(anterior.horario)+anterior.duracaoMin)) anterior = s;
+    if(ini >= fimNovo && (!proxima || ini < horaParaMinutos(proxima.horario))) proxima = s;
+  });
+
+  statusEl.innerHTML = '<div class="status-line">Calculando deslocamento...</div>';
+
+  const partes = [];
+  let ok = true;
+  let aperta = false;
+
+  if(anterior){
+    const fimAnterior = horaParaMinutos(anterior.horario) + anterior.duracaoMin;
+    const gap = inicioNovo - fimAnterior;
+    if(anterior.aluno.lat && anterior.aluno.lng){
+      const t = await tempoDeslocamento({lat:anterior.aluno.lat, lng:anterior.aluno.lng}, destino);
+      if(t){
+        const cabe = gap >= t.minutos;
+        if(!cabe) ok = false; else if(gap - t.minutos <= 10) aperta = true;
+        partes.push(`Vindo de <b>${anterior.aluno.nome}</b> (termina ${minutosParaHora(fimAnterior)}): ${t.minutos}min de trajeto · ${gap}min de janela ${cabe?'✅':'❌'}`);
+      } else {
+        partes.push(`Não consegui calcular a rota a partir de ${anterior.aluno.nome} — confira manualmente.`);
+      }
+    } else {
+      partes.push(`${anterior.aluno.nome} termina ${minutosParaHora(fimAnterior)} mas não tem endereço localizado no mapa — não dá pra calcular o trajeto.`);
+    }
+  } else {
+    partes.push('Nenhuma aula antes nesse horário/dia — sem restrição de deslocamento antes.');
+  }
+
+  if(proxima){
+    const inicioProxima = horaParaMinutos(proxima.horario);
+    const gap = inicioProxima - fimNovo;
+    if(proxima.aluno.lat && proxima.aluno.lng){
+      const t = await tempoDeslocamento(destino, {lat:proxima.aluno.lat, lng:proxima.aluno.lng});
+      if(t){
+        const cabe = gap >= t.minutos;
+        if(!cabe) ok = false; else if(gap - t.minutos <= 10) aperta = true;
+        partes.push(`Indo até <b>${proxima.aluno.nome}</b> (${proxima.horario}): ${t.minutos}min de trajeto · ${gap}min de janela ${cabe?'✅':'❌'}`);
+      } else {
+        partes.push(`Não consegui calcular a rota até ${proxima.aluno.nome} — confira manualmente.`);
+      }
+    } else {
+      partes.push(`${proxima.aluno.nome} começa ${proxima.horario} mas não tem endereço localizado no mapa — não dá pra calcular o trajeto.`);
+    }
+  } else {
+    partes.push('Nenhuma aula depois nesse horário/dia — sem restrição de deslocamento depois.');
+  }
+
+  const veredito = ok ? (aperta ? '⚠️ Dá, mas o tempo aperta' : '✅ Dá para encaixar') : '❌ Não dá — o deslocamento não cabe na janela livre';
+  const vcls = ok ? (aperta ? 'warn' : 'ok') : 'err';
+  statusEl.innerHTML =
+    `<div class="status-line ${vcls}" style="font-weight:700; font-size:14px; margin-bottom:10px;">${veredito}</div>` +
+    partes.map(p=>`<div class="aluno-meta" style="margin-bottom:6px; line-height:1.4;">${p}</div>`).join('');
+
+  btn.disabled = false;
+};
+
+window.handleDelete = async (id)=>{ await deleteAluno(id); render(); };
+window.handleMarcarPago = async (id, btn)=>{
+  const a = alunos.find(x=>x.id===id);
+  if(!a) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try{
+    await marcarPago(a);
+  }catch(err){
+    console.error('Erro ao marcar como pago:', err);
+    alert('Não consegui marcar como pago: ' + (err.message||'tente novamente.'));
+    if(btn){ btn.disabled = false; btn.textContent = 'Marcar como pago'; }
+  }
+};
+
+/* ======================= TABS NAV ======================= */
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentTab = btn.dataset.tab;
+    render();
+  });
+});
+
+/* ======================= FORM MODAL (add/edit aluno) ======================= */
+const modalBg = document.getElementById('modalBg');
+const modalBody = document.getElementById('modalBody');
+
+function closeModal(){ modalBg.classList.remove('open'); modalBody.innerHTML=''; }
+modalBg.addEventListener('click', (e)=>{ if(e.target===modalBg) closeModal(); });
+
+let formAulas = []; // estado temporário das aulas (dia+horário+duração) enquanto o modal está aberto
+
+function renderAulasRows(){
+  const wrap = document.getElementById('aulasList');
+  wrap.innerHTML = formAulas.map((aula, i)=>`
+    <div class="aula-row">
+      <div class="field-row">
+        <div class="field"><label>Dia</label>
+          <select data-i="${i}" class="aula-dia">${DIAS.map((d,di)=>`<option value="${di}" ${Number(aula.dia)===di?'selected':''}>${d}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Horário</label><input data-i="${i}" class="aula-horario" type="time" value="${aula.horario}"></div>
+        <button type="button" class="btn-remove-aula" data-i="${i}" title="Remover este dia">✕</button>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Duração (min)</label><input data-i="${i}" class="aula-duracao" type="number" value="${aula.duracaoMin}"></div>
+      </div>
+    </div>`).join('');
+
+  wrap.querySelectorAll('.aula-dia').forEach(el=>el.addEventListener('change', e=>{
+    formAulas[e.target.dataset.i].dia = e.target.value;
+  }));
+  wrap.querySelectorAll('.aula-horario').forEach(el=>el.addEventListener('change', e=>{
+    formAulas[e.target.dataset.i].horario = e.target.value;
+  }));
+  wrap.querySelectorAll('.aula-duracao').forEach(el=>el.addEventListener('change', e=>{
+    formAulas[e.target.dataset.i].duracaoMin = e.target.value;
+  }));
+  wrap.querySelectorAll('.btn-remove-aula').forEach(el=>el.addEventListener('click', e=>{
+    formAulas.splice(Number(e.target.dataset.i), 1);
+    renderAulasRows();
+  }));
+}
+
+window.openForm = function(id){
+  const aluno = id ? alunos.find(a=>a.id===id) : null;
+  if(id && !aluno){
+    console.warn('openForm: aluno não encontrado para o id', id, '— abrindo como novo aluno.');
+  }
+  formAulas = aluno ? getAulas(aluno).map(a=>({...a})) : [{dia:1, horario:'08:00', duracaoMin:60}];
+
+  modalBody.innerHTML = `
+    <div class="modal-head"><h2>${aluno?'Editar aluno':'Novo aluno'}</h2><button onclick="closeModal()">✕</button></div>
+    <div class="field"><label>Nome</label><input id="f_nome" value="${aluno?.nome||''}" placeholder="Nome do aluno"></div>
+    <div class="field"><label>Endereço da academia / condomínio</label>
+      <input id="f_endereco" value="${aluno?.endereco||''}" placeholder="Rua, número, bairro, cidade"></div>
+
+    <div class="field"><label>Dias e horários de aula</label></div>
+    <div class="aulas-list" id="aulasList"></div>
+    <button type="button" class="btn-add-aula" id="addAulaBtn">+ Adicionar outro dia</button>
+
+    <div class="field-row">
+      <div class="field"><label>Valor mensal (R$)</label><input id="f_valor" type="number" value="${aluno?.valor||''}"></div>
+      <div class="field"><label>Dia do vencimento (1–28)</label><input id="f_vencimento" type="number" min="1" max="28" value="${aluno?.diaVencimento||10}"></div>
+    </div>
+    <div class="status-line" id="formStatus">${aluno?.lat? '📍 Endereço já localizado.' : ''}</div>
+    <button class="primary-btn" id="saveBtn">Salvar aluno</button>
+  `;
+  modalBg.classList.add('open');
+  renderAulasRows();
+
+  document.getElementById('addAulaBtn').addEventListener('click', ()=>{
+    formAulas.push({dia:1, horario:'08:00', duracaoMin:60});
+    renderAulasRows();
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', async ()=>{
+    const statusEl = document.getElementById('formStatus');
+    const btn = document.getElementById('saveBtn');
+    const novo = {
+      id: aluno?.id || null,
+      nome: document.getElementById('f_nome').value.trim(),
+      endereco: document.getElementById('f_endereco').value.trim(),
+      aulas: formAulas.map(a=>({dia:Number(a.dia), horario:a.horario, duracaoMin:Number(a.duracaoMin)||60})),
+      valor: document.getElementById('f_valor').value,
+      diaVencimento: document.getElementById('f_vencimento').value,
+      lat: aluno?.lat, lng: aluno?.lng,
+      ultimoPagamento: aluno?.ultimoPagamento || null,
+    };
+    if(!novo.nome){
+      statusEl.textContent = 'Preencha o nome do aluno.'; statusEl.className='status-line err'; return;
+    }
+    if(!novo.aulas.length || novo.aulas.some(a=>!a.horario)){
+      statusEl.textContent = 'Adicione ao menos um dia com horário preenchido.'; statusEl.className='status-line err'; return;
+    }
+    btn.disabled = true; statusEl.textContent = 'Salvando...'; statusEl.className='status-line';
+
+    try{
+      const enderecoMudou = novo.endereco && novo.endereco.trim() !== (aluno?.endereco||'').trim();
+      if(enderecoMudou){
+        statusEl.textContent = 'Localizando endereço no mapa...';
+        const geo = await geocode(novo.endereco);
+        if(geo){ novo.lat = geo.lat; novo.lng = geo.lng; }
+        else statusEl.textContent = 'Não achei esse endereço — salvo mesmo assim, ajuste depois se precisar.';
+      }
+      // Firestore não aceita valores "undefined" — remove lat/lng se ainda não localizados
+      if(novo.lat===undefined) delete novo.lat;
+      if(novo.lng===undefined) delete novo.lng;
+
+      statusEl.textContent = 'Salvando no banco de dados...';
+      const salvouATempo = await Promise.race([
+        saveAluno(novo).then(()=>true),
+        new Promise(resolve=>setTimeout(()=>resolve('timeout'), 10000))
+      ]);
+      if(salvouATempo==='timeout'){
+        throw new Error('Tempo esgotado ao salvar no Firestore (10s). Confira as regras de segurança do Firestore ou a conexão.');
+      }
+      closeModal();
+      render();
+    }catch(err){
+      console.error('Erro ao salvar aluno:', err);
+      statusEl.textContent = 'Deu um erro ao salvar: ' + (err.message||'tente novamente.');
+      statusEl.className = 'status-line err';
+    }finally{
+      btn.disabled = false;
+    }
+  });
+};
+
+document.getElementById('fabBtn').addEventListener('click', ()=>openForm(null));
+
+/* ======================= INIT ======================= */
+loadAlunos();
+</script>
+</body>
+</html>
