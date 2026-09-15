@@ -352,7 +352,8 @@ function statusPagamento(aluno){
   const diffDias = Math.round((venc - new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate())) / 86400000);
   if(diffDias < 0) return {label:`Atrasado ${Math.abs(diffDias)}d`, cls:'late'};
   if(diffDias <= 3) return {label:diffDias===0?'Vence hoje':`Vence em ${diffDias}d`, cls:'warn'};
-  return {label:`Vence dia ${venc.getDate()}`, cls:'ok'};
+  const mesAbrev = venc.toLocaleDateString('pt-BR', {month:'short'}).replace('.','');
+  return {label:`Vence dia ${venc.getDate()} de ${mesAbrev}`, cls:'ok'};
 }
 
 /* ======================= RENDER: TRACK ======================= */
