@@ -110,9 +110,9 @@
   .status-line.ok{color:var(--lime);}
   .status-line.warn{color:#FFC13D;}
 
-  .fab{position:fixed; right:calc(50% - 240px + 20px); bottom:92px; width:52px; height:52px; border-radius:50%;
+  .fab{position:fixed; right:calc(50% - 240px + 20px); bottom:calc(78px + env(safe-area-inset-bottom) + 14px); width:52px; height:52px; border-radius:50%;
     background:var(--lime); color:#12151A; font-size:26px; border:none; box-shadow:0 6px 18px rgba(201,255,61,0.35);
-    display:flex; align-items:center; justify-content:center; z-index:20;}
+    display:flex; align-items:center; justify-content:center; z-index:35;}
   @media (max-width:520px){ .fab{right:20px;} }
 
   /* MODAL */
