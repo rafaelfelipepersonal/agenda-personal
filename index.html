@@ -87,7 +87,9 @@
   .field{margin-bottom:12px;}
   .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:5px;}
   .field input, .field select{width:100%; min-width:0; background:var(--surface-2); border:1px solid var(--line);
-    color:var(--text); padding:11px 12px; border-radius:10px; font-family:inherit; font-size:14.5px;}
+    color:var(--text); padding:11px 12px; border-radius:10px; font-family:inherit; font-size:14.5px;
+    -webkit-appearance:none; appearance:none;}
+  .field input.time-mask{font-variant-numeric:tabular-nums; letter-spacing:0.5px;}
   .field input:focus, .field select:focus{outline:none; border-color:var(--lime);}
   .field-row{display:flex; gap:10px;}
   .field-row .field{flex:1; min-width:0;}
@@ -313,6 +315,23 @@ function horaParaMinutos(hhmm){
   const [h,m] = hhmm.split(':').map(Number);
   return h*60+m;
 }
+// Máscara simples HH:MM para inputs de horário digitados (evita o seletor nativo de time)
+function aplicarMascaraHorario(el){
+  el.addEventListener('input', ()=>{
+    let v = el.value.replace(/[^0-9]/g,'').slice(0,4);
+    if(v.length>=3) v = v.slice(0,2)+':'+v.slice(2);
+    el.value = v;
+  });
+  el.addEventListener('blur', ()=>{
+    let v = el.value.replace(/[^0-9]/g,'');
+    if(!v){ return; }
+    while(v.length<4) v = v.length<=1 ? '0'+v : v+'0';
+    let h = Math.min(23, Number(v.slice(0,2)));
+    let m = Math.min(59, Number(v.slice(2,4)));
+    el.value = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  });
+}
+
 // Normaliza as aulas de um aluno. Suporta o formato novo (aluno.aulas = [{dia,horario,duracaoMin}])
 // e mantém compatibilidade com cadastros antigos que tinham só um dia/horário fixo.
 function getAulas(aluno){
@@ -473,7 +492,7 @@ function render(){
           <div class="field"><label>Dia</label>
             <select id="c_dia">${DIAS.map((d,di)=>`<option value="${di}" ${di===new Date().getDay()?'selected':''}>${d}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>Horário desejado</label><input id="c_horario" type="time" value="17:00"></div>
+          <div class="field"><label>Horário desejado</label><input id="c_horario" type="text" inputmode="numeric" class="time-mask" placeholder="HH:MM" maxlength="5" value="17:00"></div>
         </div>
         <div class="field"><label>Duração da aula (min)</label><input id="c_duracao" type="number" value="60"></div>
         <button class="primary-btn" id="consultaBtn">Verificar disponibilidade</button>
@@ -481,6 +500,7 @@ function render(){
       </div>
     `;
     document.getElementById('consultaBtn').addEventListener('click', handleConsultaCheck);
+    aplicarMascaraHorario(document.getElementById('c_horario'));
   }
 
   if(currentTab==='pagamentos'){
@@ -649,7 +669,7 @@ function renderAulasRows(){
         <div class="field"><label>Dia</label>
           <select data-i="${i}" class="aula-dia">${DIAS.map((d,di)=>`<option value="${di}" ${Number(aula.dia)===di?'selected':''}>${d}</option>`).join('')}</select>
         </div>
-        <div class="field"><label>Horário</label><input data-i="${i}" class="aula-horario" type="time" value="${aula.horario}"></div>
+        <div class="field"><label>Horário</label><input data-i="${i}" class="aula-horario time-mask" type="text" inputmode="numeric" placeholder="HH:MM" maxlength="5" value="${aula.horario}"></div>
         <button type="button" class="btn-remove-aula" data-i="${i}" title="Remover este dia">✕</button>
       </div>
       <div class="field-row">
@@ -660,9 +680,12 @@ function renderAulasRows(){
   wrap.querySelectorAll('.aula-dia').forEach(el=>el.addEventListener('change', e=>{
     formAulas[e.target.dataset.i].dia = e.target.value;
   }));
-  wrap.querySelectorAll('.aula-horario').forEach(el=>el.addEventListener('change', e=>{
-    formAulas[e.target.dataset.i].horario = e.target.value;
-  }));
+  wrap.querySelectorAll('.aula-horario').forEach(el=>{
+    aplicarMascaraHorario(el);
+    el.addEventListener('change', e=>{
+      formAulas[e.target.dataset.i].horario = e.target.value;
+    });
+  });
   wrap.querySelectorAll('.aula-duracao').forEach(el=>el.addEventListener('change', e=>{
     formAulas[e.target.dataset.i].duracaoMin = e.target.value;
   }));
