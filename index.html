@@ -50,6 +50,7 @@
   .track{position:relative; display:flex; align-items:stretch; gap:0; overflow-x:auto; padding-bottom:6px;}
   .seg{flex:0 0 auto; min-width:76px; padding:10px 8px; border-radius:10px; margin-right:6px; position:relative;}
   .seg.aula{background:rgba(201,255,61,0.12); border:1px solid var(--lime-dim);}
+  .seg.aula.remarcada{background:rgba(255,193,61,0.14); border:1px solid #FFC13D;}
   .seg.deslocamento{background:transparent; border:1px dashed var(--line); display:flex; align-items:center; justify-content:center; min-width:44px;}
   .seg.deslocamento .t{font-size:11px; color:var(--muted); writing-mode:horizontal-tb;}
   .seg .name{font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;}
@@ -76,6 +77,11 @@
   .badge.ok{background:rgba(201,255,61,0.15); color:var(--lime);}
   .badge.warn{background:rgba(255,193,61,0.15); color:#FFC13D;}
   .badge.late{background:rgba(255,93,93,0.18); color:var(--coral);}
+  .badge.remarc{background:rgba(255,193,61,0.15); color:#FFC13D;}
+  .badge.cancel{background:rgba(255,93,93,0.18); color:var(--coral);}
+  .card.remarcada{border-color:#FFC13D; background:linear-gradient(180deg, rgba(255,193,61,0.08), var(--surface));}
+  .card.cancelada{opacity:0.65; border-style:dashed;}
+  .tachado{text-decoration:line-through; opacity:0.6;}
   .card-actions{display:flex; gap:8px; margin-top:12px;}
   .card-actions button{flex:1; padding:9px; border-radius:9px; border:none; font-family:inherit;
     font-size:12.5px; font-weight:600;}
@@ -211,9 +217,9 @@ document.getElementById('setupBanner').style.display = usingFirebase ? 'none' : 
 /* ======================= STATE ======================= */
 const DIAS = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 let alunos = []; // {id, nome, endereco, lat, lng, aulas:[{dia(0-6), horario('HH:MM'), duracaoMin}], valor, diaVencimento, ultimoPagamento}
+let excecoes = []; // alterações pontuais: {id, alunoId, data:'YYYY-MM-DD', novoHorario:'HH:MM'|null, cancelada:bool, motivo}
 let currentTab = 'agenda';
-let trackDayOffset = 0; // 0 = hoje
-let agendaDia = new Date().getDay(); // dia da semana (0-6) exibido na aba Agenda
+let trackDayOffset = 0; // 0 = hoje — controla a data exibida tanto na trilha quanto na lista da Agenda
 
 const uid = () => Math.random().toString(36).slice(2,10);
 
@@ -223,7 +229,34 @@ async function loadAlunos(){
     const snap = await db.collection('alunos').get();
     alunos = snap.docs.map(d => ({...d.data(), id:d.id}));
   }
+  await loadExcecoes();
   render();
+}
+async function loadExcecoes(){
+  if(usingFirebase){
+    const snap = await db.collection('excecoes').get();
+    excecoes = snap.docs.map(d => ({...d.data(), id:d.id}));
+  }
+}
+async function saveExcecao(exc){
+  if(usingFirebase){
+    const {id, ...dados} = exc;
+    if(id && excecoes.find(e=>e.id===id)){
+      await db.collection('excecoes').doc(id).set(dados);
+      exc.id = id;
+    } else {
+      const ref = await db.collection('excecoes').add(dados);
+      exc.id = ref.id;
+    }
+  } else if(!exc.id){
+    exc.id = uid();
+  }
+  const idx = excecoes.findIndex(e=>e.id===exc.id);
+  if(idx>=0) excecoes[idx]=exc; else excecoes.push(exc);
+}
+async function deleteExcecao(id){
+  if(usingFirebase) await db.collection('excecoes').doc(id).delete();
+  excecoes = excecoes.filter(e=>e.id!==id);
 }
 async function saveAluno(aluno){
   if(usingFirebase){
@@ -344,11 +377,45 @@ function getAulas(aluno){
   return [];
 }
 // Retorna as sessões (aula + aluno) que caem num dia da semana específico, ordenadas por horário.
-function sessoesDoDia(diaSemana){
+// Versão "modelo" — ignora alterações pontuais; usada pela Consulta de disponibilidade,
+// que avalia o padrão semanal recorrente, não uma data específica.
+function sessoesTemplateDoDia(diaSemana){
   const out = [];
   alunos.forEach(a=>{
     getAulas(a).forEach(aula=>{
       if(aula.dia===diaSemana) out.push({aluno:a, horario:aula.horario, duracaoMin:aula.duracaoMin});
+    });
+  });
+  return out.sort((x,y)=>horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
+}
+function dataISO(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function getAgendaDate(){
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate()+trackDayOffset);
+  return d;
+}
+function getExcecao(alunoId, dataStr){
+  return excecoes.find(e=>e.alunoId===alunoId && e.data===dataStr);
+}
+// Retorna as sessões de uma DATA real (não só o dia da semana), já aplicando remarcações/cancelamentos
+// pontuais registrados para aquele dia específico — sem tocar no cadastro fixo do aluno.
+function sessoesDoDia(date){
+  const diaSemana = date.getDay();
+  const dataStr = dataISO(date);
+  const out = [];
+  alunos.forEach(a=>{
+    getAulas(a).forEach(aula=>{
+      if(aula.dia!==diaSemana) return;
+      const exc = getExcecao(a.id, dataStr);
+      const item = {aluno:a, horario:aula.horario, duracaoMin:aula.duracaoMin, horarioOriginal:aula.horario, cancelada:false, remarcada:false, motivo:null};
+      if(exc){
+        if(exc.cancelada){ item.cancelada = true; }
+        else if(exc.novoHorario){ item.horario = exc.novoHorario; item.remarcada = true; item.motivo = exc.motivo||null; }
+      }
+      out.push(item);
     });
   });
   return out.sort((x,y)=>horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
@@ -377,13 +444,12 @@ function statusPagamento(aluno){
 
 /* ======================= RENDER: TRACK ======================= */
 async function renderTrack(){
-  const d = new Date();
-  d.setDate(d.getDate()+trackDayOffset);
+  const d = getAgendaDate();
   const diaSemana = d.getDay();
   document.getElementById('trackDayLabel').textContent =
     trackDayOffset===0 ? `Hoje · ${DIAS[diaSemana]}` : `${DIAS[diaSemana]} · ${d.toLocaleDateString('pt-BR')}`;
 
-  const lista = sessoesDoDia(diaSemana);
+  const lista = sessoesDoDia(d).filter(s=>!s.cancelada);
   const trackEl = document.getElementById('trackEl');
   if(!lista.length){
     trackEl.innerHTML = '<div class="empty-track">Nenhuma aula nesse dia.</div>';
@@ -394,7 +460,9 @@ async function renderTrack(){
   let html = '';
   for(let i=0;i<lista.length;i++){
     const s = lista[i];
-    html += `<div class="seg aula"><div class="name">${s.aluno.nome}</div><div class="time">${s.horario}–${minutosParaHora(horaParaMinutos(s.horario)+s.duracaoMin)}</div></div>`;
+    const remClass = s.remarcada ? ' remarcada' : '';
+    const tagRem = s.remarcada ? ` <span style="font-size:10px;">🔁</span>` : '';
+    html += `<div class="seg aula${remClass}"><div class="name">${s.aluno.nome}${tagRem}</div><div class="time">${s.horario}–${minutosParaHora(horaParaMinutos(s.horario)+s.duracaoMin)}</div></div>`;
     if(i < lista.length-1){
       const prox = lista[i+1];
       let label = '···';
@@ -427,26 +495,64 @@ function render(){
     if(!alunos.length){
       main.innerHTML = '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
     } else {
-      let html = `<div class="day-picker" id="dayPicker">${DIAS.map((d,di)=>
-        `<button type="button" class="day-pill ${di===agendaDia?'active':''}" data-dia="${di}">${d.slice(0,3)}</button>`
-      ).join('')}</div>`;
+      const agendaDate = getAgendaDate();
+      const diaSemanaAtual = agendaDate.getDay();
+      const dataStrAtual = dataISO(agendaDate);
+      const sunday = new Date(agendaDate);
+      sunday.setDate(agendaDate.getDate() - diaSemanaAtual);
+      const hojeZero = new Date(); hojeZero.setHours(0,0,0,0);
 
-      const lista = sessoesDoDia(agendaDia);
+      let html = `<div class="day-picker" id="dayPicker">${DIAS.map((d,di)=>{
+        const dt = new Date(sunday); dt.setDate(sunday.getDate()+di);
+        const offset = Math.round((dt - hojeZero) / 86400000);
+        return `<button type="button" class="day-pill ${di===diaSemanaAtual?'active':''}" data-offset="${offset}">${d.slice(0,3)}</button>`;
+      }).join('')}</div>`;
+
+      const lista = sessoesDoDia(agendaDate);
       if(!lista.length){
-        html += `<div class="empty-track">Nenhuma aula ${DIAS[agendaDia].toLowerCase()}.</div>`;
+        html += `<div class="empty-track">Nenhuma aula ${DIAS[diaSemanaAtual].toLowerCase()}.</div>`;
       } else {
         lista.forEach(s=>{
-          html += `<div class="card"><div class="row">
+          let cardCls = 'card';
+          let metaHtml, badgeHtml = '';
+          if(s.cancelada){
+            cardCls += ' cancelada';
+            badgeHtml = `<span class="badge cancel">Cancelado hoje</span>`;
+            metaHtml = `<span class="tachado">${s.horarioOriginal}</span> · ${s.aluno.endereco||'sem endereço'}`;
+          } else if(s.remarcada){
+            cardCls += ' remarcada';
+            badgeHtml = `<span class="badge remarc">Remarcado</span>`;
+            metaHtml = `<span class="tachado">${s.horarioOriginal}</span> → <b>${s.horario}</b> · ${s.aluno.endereco||'sem endereço'}`;
+          } else {
+            metaHtml = `${s.horario} · ${s.aluno.endereco||'sem endereço'}`;
+          }
+          const alterado = s.cancelada || s.remarcada;
+          html += `<div class="${cardCls}"><div class="row">
             <div><div class="aluno-nome">${s.aluno.nome}</div>
-            <div class="aluno-meta">${s.horario} · ${s.aluno.endereco||'sem endereço'}</div></div>
-          </div></div>`;
+            <div class="aluno-meta">${metaHtml}</div>${s.motivo?`<div class="aluno-meta" style="opacity:.7;">Motivo: ${s.motivo}</div>`:''}</div>
+            ${badgeHtml}
+          </div>
+          <div class="card-actions">
+            <button type="button" class="btn-ghost btn-remarcar" data-aluno="${s.aluno.id}">${alterado?'Editar alteração':'Remarcar hoje'}</button>
+            ${alterado?`<button type="button" class="btn-del btn-desfazer" data-aluno="${s.aluno.id}">Desfazer</button>`:''}
+          </div>
+          </div>`;
         });
       }
       main.innerHTML = html;
       document.querySelectorAll('.day-pill').forEach(btn=>btn.addEventListener('click', e=>{
-        agendaDia = Number(e.currentTarget.dataset.dia);
+        trackDayOffset = Number(e.currentTarget.dataset.offset);
         render();
       }));
+      main.querySelectorAll('.btn-remarcar').forEach(btn=>{
+        btn.addEventListener('click', ()=> openRemarcar(btn.dataset.aluno, dataStrAtual));
+      });
+      main.querySelectorAll('.btn-desfazer').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          const exc = getExcecao(btn.dataset.aluno, dataStrAtual);
+          if(exc){ await deleteExcecao(exc.id); render(); }
+        });
+      });
     }
   }
 
@@ -552,7 +658,7 @@ window.handleConsultaCheck = async function(){
 
   const inicioNovo = horaParaMinutos(horario);
   const fimNovo = inicioNovo + duracao;
-  const lista = sessoesDoDia(diaSemana);
+  const lista = sessoesTemplateDoDia(diaSemana);
 
   // conflito direto: já existe aula que bate em cima do horário pedido
   const conflito = lista.find(s=>{
@@ -658,6 +764,88 @@ const modalBody = document.getElementById('modalBody');
 
 function closeModal(){ modalBg.classList.remove('open'); modalBody.innerHTML=''; }
 modalBg.addEventListener('click', (e)=>{ if(e.target===modalBg) closeModal(); });
+
+/* ======================= REMARCAÇÃO PONTUAL (exceção por data) ======================= */
+window.openRemarcar = function(alunoId, dataStr){
+  const aluno = alunos.find(a=>a.id===alunoId);
+  if(!aluno) return;
+  const exc = getExcecao(alunoId, dataStr);
+  const diaSemana = new Date(dataStr+'T00:00:00').getDay();
+  const aulaBase = getAulas(aluno).find(x=>x.dia===diaSemana);
+  const horarioBase = aulaBase ? aulaBase.horario : '';
+  const dataLabel = new Date(dataStr+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long', day:'2-digit', month:'long'});
+
+  modalBody.innerHTML = `
+    <div class="modal-head"><h2>Alterar aula de ${aluno.nome}</h2><button onclick="closeModal()">✕</button></div>
+    <div class="field"><label>Dia</label><input value="${dataLabel}" disabled></div>
+    <div class="field"><label>Horário original</label><input value="${horarioBase}" disabled></div>
+    <div class="field"><label>Novo horário (deixe em branco se for só cancelar)</label>
+      <input id="rm_horario" type="text" inputmode="numeric" class="time-mask" placeholder="HH:MM" maxlength="5" value="${exc&&exc.novoHorario?exc.novoHorario:''}"></div>
+    <div class="field" style="display:flex; align-items:center; gap:8px; flex-direction:row;">
+      <input type="checkbox" id="rm_cancelar" style="width:auto;" ${exc&&exc.cancelada?'checked':''}>
+      <label style="margin:0;">Cancelar a aula nesse dia (sem remarcar)</label>
+    </div>
+    <div class="field"><label>Motivo (opcional)</label><input id="rm_motivo" placeholder="Ex: compromisso médico" value="${exc&&exc.motivo?exc.motivo:''}"></div>
+    <div class="status-line" id="rmStatus"></div>
+    <button class="primary-btn" id="rmSaveBtn">Salvar alteração</button>
+    ${exc?`<button type="button" class="btn-del" style="width:100%; margin-top:10px; padding:12px; border-radius:10px;" id="rmRemoveBtn">Remover alteração (voltar ao normal)</button>`:''}
+  `;
+  modalBg.classList.add('open');
+  aplicarMascaraHorario(document.getElementById('rm_horario'));
+
+  const cancelarChk = document.getElementById('rm_cancelar');
+  const horarioInput = document.getElementById('rm_horario');
+  cancelarChk.addEventListener('change', ()=>{
+    horarioInput.disabled = cancelarChk.checked;
+    if(cancelarChk.checked) horarioInput.value = '';
+  });
+  if(cancelarChk.checked) horarioInput.disabled = true;
+
+  document.getElementById('rmSaveBtn').addEventListener('click', async ()=>{
+    const statusEl = document.getElementById('rmStatus');
+    const cancelar = cancelarChk.checked;
+    const novoHorario = horarioInput.value.trim();
+    if(!cancelar && !novoHorario){
+      statusEl.textContent = 'Informe um novo horário ou marque "Cancelar".';
+      statusEl.className = 'status-line err';
+      return;
+    }
+    const payload = {
+      id: exc ? exc.id : null,
+      alunoId,
+      data: dataStr,
+      novoHorario: cancelar ? null : novoHorario,
+      cancelada: cancelar,
+      motivo: document.getElementById('rm_motivo').value.trim() || null
+    };
+    statusEl.textContent = 'Salvando...'; statusEl.className = 'status-line';
+    try{
+      await saveExcecao(payload);
+      closeModal();
+      render();
+    }catch(err){
+      console.error('Erro ao salvar exceção:', err);
+      statusEl.textContent = 'Erro ao salvar: ' + (err.message||'tente novamente.');
+      statusEl.className = 'status-line err';
+    }
+  });
+
+  const removeBtn = document.getElementById('rmRemoveBtn');
+  if(removeBtn){
+    removeBtn.addEventListener('click', async ()=>{
+      removeBtn.disabled = true; removeBtn.textContent = 'Removendo...';
+      try{
+        await deleteExcecao(exc.id);
+        closeModal();
+        render();
+      }catch(err){
+        console.error('Erro ao remover exceção:', err);
+        alert('Não consegui remover: ' + (err.message||'tente novamente.'));
+        removeBtn.disabled = false; removeBtn.textContent = 'Remover alteração (voltar ao normal)';
+      }
+    });
+  }
+};
 
 let formAulas = []; // estado temporário das aulas (dia+horário+duração) enquanto o modal está aberto
 
