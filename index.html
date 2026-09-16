@@ -186,6 +186,7 @@
   <div class="tabwrap">
     <button class="tab-btn active" data-tab="agenda"><span class="ic">📅</span>Agenda</button>
     <button class="tab-btn" data-tab="consulta"><span class="ic">🔍</span>Consulta</button>
+    <button class="tab-btn" data-tab="horarios"><span class="ic">🕒</span>Vagas</button>
     <button class="tab-btn" data-tab="alunos"><span class="ic">🧍</span>Alunos</button>
     <button class="tab-btn" data-tab="pagamentos"><span class="ic">💳</span>Pagamentos</button>
   </div>
@@ -450,6 +451,22 @@ function sessoesDoDia(date){
 
   return out.sort((x,y)=>horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
 }
+// Calcula os intervalos livres de um dia (em minutos desde 00:00), já considerando remarcações/cancelamentos.
+// inicioMin/fimMin = janela de trabalho; minGap = duração mínima (min) pra contar como "vaga".
+function horariosLivresDoDia(date, inicioMin, fimMin, minGap){
+  const ocupados = sessoesDoDia(date)
+    .filter(s=>!s.cancelada && !s.movida)
+    .map(s=>({ini:horaParaMinutos(s.horario), fim:horaParaMinutos(s.horario)+s.duracaoMin}))
+    .sort((a,b)=>a.ini-b.ini);
+  const livres = [];
+  let cursor = inicioMin;
+  ocupados.forEach(o=>{
+    if(o.ini > cursor && (o.ini-cursor) >= minGap) livres.push({ini:cursor, fim:o.ini});
+    cursor = Math.max(cursor, o.fim);
+  });
+  if(fimMin > cursor && (fimMin-cursor) >= minGap) livres.push({ini:cursor, fim:fimMin});
+  return livres;
+}
 function proximoVencimento(aluno){
   const hoje = new Date();
   const diaV = Number(aluno.diaVencimento||10);
@@ -594,6 +611,74 @@ function render(){
         });
       });
     }
+  }
+
+  if(currentTab==='horarios'){
+    heading.innerHTML = 'Vagas<span>.</span>';
+    const agendaDate = getAgendaDate();
+    const diaSemanaAtual = agendaDate.getDay();
+    const sunday = new Date(agendaDate);
+    sunday.setDate(agendaDate.getDate() - diaSemanaAtual);
+    const hojeZero = new Date(); hojeZero.setHours(0,0,0,0);
+
+    let prefs;
+    try{ prefs = JSON.parse(localStorage.getItem('horariosPrefs')||''); }catch(e){ prefs = null; }
+    if(!prefs || !prefs.inicio || !prefs.fim) prefs = {inicio:'06:00', fim:'21:00', minSlot:30};
+
+    let html = `<div class="day-picker" id="dayPicker">${DIAS.map((d,di)=>{
+      const dt = new Date(sunday); dt.setDate(sunday.getDate()+di);
+      const offset = Math.round((dt - hojeZero) / 86400000);
+      return `<button type="button" class="day-pill ${di===diaSemanaAtual?'active':''}" data-offset="${offset}">${d.slice(0,3)}</button>`;
+    }).join('')}</div>`;
+
+    html += `<div class="card">
+      <div class="field-row">
+        <div class="field"><label>Início do dia</label><input id="hl_inicio" type="text" inputmode="numeric" class="time-mask" placeholder="HH:MM" maxlength="5" value="${prefs.inicio}"></div>
+        <div class="field"><label>Fim do dia</label><input id="hl_fim" type="text" inputmode="numeric" class="time-mask" placeholder="HH:MM" maxlength="5" value="${prefs.fim}"></div>
+      </div>
+      <div class="field"><label>Encaixe mínimo (minutos)</label><input id="hl_min" type="number" min="10" step="5" value="${prefs.minSlot}"></div>
+    </div>`;
+
+    const inicioMin = horaParaMinutos(prefs.inicio);
+    const fimMin = horaParaMinutos(prefs.fim);
+    const livres = fimMin > inicioMin ? horariosLivresDoDia(agendaDate, inicioMin, fimMin, prefs.minSlot) : [];
+
+    if(fimMin <= inicioMin){
+      html += `<div class="empty-track">O horário de fim precisa ser depois do início.</div>`;
+    } else if(!livres.length){
+      html += `<div class="empty-track">Nenhuma vaga ${DIAS[diaSemanaAtual].toLowerCase()} dentro da janela configurada.</div>`;
+    } else {
+      livres.forEach(l=>{
+        const dur = l.fim - l.ini;
+        const durLabel = dur>=60 ? `${Math.floor(dur/60)}h${dur%60?String(dur%60).padStart(2,'0')+'min':''}` : `${dur}min`;
+        html += `<div class="card"><div class="row">
+          <div><div class="aluno-nome">${minutosParaHora(l.ini)} – ${minutosParaHora(l.fim)}</div>
+          <div class="aluno-meta">Livre por ${durLabel}</div></div>
+          <span class="badge ok">Disponível</span>
+        </div></div>`;
+      });
+    }
+
+    main.innerHTML = html;
+    document.querySelectorAll('.day-pill').forEach(btn=>btn.addEventListener('click', e=>{
+      trackDayOffset = Number(e.currentTarget.dataset.offset);
+      render();
+    }));
+
+    function salvarPrefsHorarios(){
+      const novo = {
+        inicio: document.getElementById('hl_inicio').value || '06:00',
+        fim: document.getElementById('hl_fim').value || '21:00',
+        minSlot: Number(document.getElementById('hl_min').value) || 30
+      };
+      localStorage.setItem('horariosPrefs', JSON.stringify(novo));
+      render();
+    }
+    aplicarMascaraHorario(document.getElementById('hl_inicio'));
+    aplicarMascaraHorario(document.getElementById('hl_fim'));
+    document.getElementById('hl_inicio').addEventListener('blur', salvarPrefsHorarios);
+    document.getElementById('hl_fim').addEventListener('blur', salvarPrefsHorarios);
+    document.getElementById('hl_min').addEventListener('change', salvarPrefsHorarios);
   }
 
   if(currentTab==='alunos'){
