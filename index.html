@@ -111,6 +111,9 @@
   .primary-btn{width:100%; background:var(--lime); color:#12151A; border:none; padding:14px;
     border-radius:12px; font-family:inherit; font-weight:800; font-size:15px; margin-top:6px;}
   .primary-btn:disabled{opacity:0.5;}
+  .danger-btn{width:100%; background:var(--coral); color:#fff; border:none; padding:14px;
+    border-radius:12px; font-weight:700; font-size:15px; font-family:inherit;}
+  .danger-btn:disabled{opacity:0.5;}
   .status-line{font-size:12.5px; color:var(--muted); margin-top:8px; min-height:16px;}
   .status-line.err{color:var(--coral);}
   .status-line.ok{color:var(--lime);}
@@ -620,7 +623,7 @@ function render(){
         btn.addEventListener('click', ()=> openForm(btn.dataset.id));
       });
       main.querySelectorAll('.btn-excluir-aluno').forEach(btn=>{
-        btn.addEventListener('click', ()=> handleDelete(btn.dataset.id));
+        btn.addEventListener('click', ()=> confirmarExclusaoAluno(btn.dataset.id));
       });
     }
   }
@@ -769,6 +772,36 @@ window.handleConsultaCheck = async function(){
     partes.map(p=>`<div class="aluno-meta" style="margin-bottom:6px; line-height:1.4;">${p}</div>`).join('');
 
   btn.disabled = false;
+};
+
+window.confirmarExclusaoAluno = function(id){
+  const aluno = alunos.find(a=>a.id===id);
+  if(!aluno) return;
+  modalBody.innerHTML = `
+    <div class="modal-head"><h2>Excluir aluno</h2><button onclick="closeModal()">✕</button></div>
+    <p style="color:var(--text); font-size:15px; line-height:1.5; margin:0 0 20px;">
+      Tem certeza que deseja excluir <b>${aluno.nome}</b>? Essa ação não pode ser desfeita — os dados de cadastro, aulas e histórico de pagamento desse aluno serão apagados.
+    </p>
+    <div class="status-line" id="delStatus"></div>
+    <button type="button" class="danger-btn" id="confirmDelBtn">Sim, excluir</button>
+    <button type="button" class="btn-ghost" style="width:100%; margin-top:10px; padding:12px; border-radius:10px;" onclick="closeModal()">Cancelar</button>
+  `;
+  modalBg.classList.add('open');
+  document.getElementById('confirmDelBtn').addEventListener('click', async (e)=>{
+    const btn = e.currentTarget;
+    const statusEl = document.getElementById('delStatus');
+    btn.disabled = true; btn.textContent = 'Excluindo...';
+    try{
+      await deleteAluno(id);
+      closeModal();
+      render();
+    }catch(err){
+      console.error('Erro ao excluir aluno:', err);
+      statusEl.textContent = 'Erro ao excluir: ' + (err.message||'tente novamente.');
+      statusEl.className = 'status-line err';
+      btn.disabled = false; btn.textContent = 'Sim, excluir';
+    }
+  });
 };
 
 window.handleDelete = async (id)=>{ await deleteAluno(id); render(); };
