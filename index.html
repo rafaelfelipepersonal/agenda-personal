@@ -82,10 +82,11 @@
   .card.remarcada{border-color:#FFC13D; background:linear-gradient(180deg, rgba(255,193,61,0.08), var(--surface));}
   .card.cancelada{opacity:0.65; border-style:dashed;}
   .tachado{text-decoration:line-through; opacity:0.6;}
-  .card-actions{display:flex; gap:8px; margin-top:12px;}
-  .card-actions button{flex:1; padding:9px; border-radius:9px; border:none; font-family:inherit;
+  .card-actions{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;}
+  .card-actions button{flex:1; min-width:110px; padding:9px; border-radius:9px; border:none; font-family:inherit;
     font-size:12.5px; font-weight:600;}
   .btn-ghost{background:var(--surface-2); color:var(--text);}
+  .btn-realizada.on{background:rgba(201,255,61,0.18); color:var(--lime);}
   .btn-lime{background:var(--lime); color:#12151A;}
   .btn-del{background:transparent; color:var(--coral); border:1px solid var(--coral-dim) !important;}
 
@@ -223,6 +224,7 @@ document.getElementById('setupBanner').style.display = usingFirebase ? 'none' : 
 const DIAS = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
 let alunos = []; // {id, nome, endereco, lat, lng, aulas:[{dia(0-6), horario('HH:MM'), duracaoMin}], valor, diaVencimento, ultimoPagamento}
 let excecoes = []; // alterações pontuais: {id, alunoId, data:'YYYY-MM-DD', novoHorario:'HH:MM'|null, cancelada:bool, motivo}
+let realizadas = []; // aulas marcadas como dadas: {id, alunoId, data:'YYYY-MM-DD'}
 let currentTab = 'agenda';
 let trackDayOffset = 0; // 0 = hoje — controla a data exibida tanto na trilha quanto na lista da Agenda
 
@@ -235,12 +237,38 @@ async function loadAlunos(){
     alunos = snap.docs.map(d => ({...d.data(), id:d.id}));
   }
   await loadExcecoes();
+  await loadRealizadas();
   render();
 }
 async function loadExcecoes(){
   if(usingFirebase){
     const snap = await db.collection('excecoes').get();
     excecoes = snap.docs.map(d => ({...d.data(), id:d.id}));
+  }
+}
+async function loadRealizadas(){
+  if(usingFirebase){
+    const snap = await db.collection('realizadas').get();
+    realizadas = snap.docs.map(d => ({...d.data(), id:d.id}));
+  }
+}
+function isRealizada(alunoId, dataStr){
+  return realizadas.some(r=>r.alunoId===alunoId && r.data===dataStr);
+}
+async function toggleRealizada(alunoId, dataStr){
+  const existente = realizadas.find(r=>r.alunoId===alunoId && r.data===dataStr);
+  if(existente){
+    if(usingFirebase) await db.collection('realizadas').doc(existente.id).delete();
+    realizadas = realizadas.filter(r=>r.id!==existente.id);
+  } else {
+    const novo = {alunoId, data:dataStr};
+    if(usingFirebase){
+      const ref = await db.collection('realizadas').add(novo);
+      novo.id = ref.id;
+    } else {
+      novo.id = uid();
+    }
+    realizadas.push(novo);
   }
 }
 async function saveExcecao(exc){
@@ -510,7 +538,8 @@ async function renderTrack(){
     const s = lista[i];
     const remClass = s.remarcada ? ' remarcada' : '';
     const tagRem = s.remarcada ? ` <span style="font-size:10px;">🔁</span>` : '';
-    html += `<div class="seg aula${remClass}"><div class="name">${s.aluno.nome}${tagRem}</div><div class="time">${s.horario}–${minutosParaHora(horaParaMinutos(s.horario)+s.duracaoMin)}</div></div>`;
+    const tagDada = isRealizada(s.aluno.id, dataISO(d)) ? ' ✅' : '';
+    html += `<div class="seg aula${remClass}"><div class="name">${s.aluno.nome}${tagRem}${tagDada}</div><div class="time">${s.horario}–${minutosParaHora(horaParaMinutos(s.horario)+s.duracaoMin)}</div></div>`;
     if(i < lista.length-1){
       const prox = lista[i+1];
       let label = '···';
@@ -585,12 +614,15 @@ function render(){
             metaHtml = `${s.horario} · ${s.aluno.endereco||'sem endereço'}`;
           }
           const alterado = s.cancelada || s.movida || s.remarcada || s.vindaDeOutroDia;
+          const podeMarcarDada = !s.cancelada && !s.movida;
+          const dada = podeMarcarDada && isRealizada(s.aluno.id, dataStrAtual);
           html += `<div class="${cardCls}"><div class="row">
-            <div><div class="aluno-nome">${s.aluno.nome}</div>
+            <div><div class="aluno-nome">${dada?'✅ ':''}${s.aluno.nome}</div>
             <div class="aluno-meta">${metaHtml}</div>${s.motivo?`<div class="aluno-meta" style="opacity:.7;">Motivo: ${s.motivo}</div>`:''}</div>
             ${badgeHtml}
           </div>
           <div class="card-actions">
+            ${podeMarcarDada?`<button type="button" class="btn-ghost btn-realizada ${dada?'on':''}" data-aluno="${s.aluno.id}" data-data="${dataStrAtual}">${dada?'✓ Aula dada':'Marcar como dada'}</button>`:''}
             <button type="button" class="btn-ghost btn-remarcar" data-aluno="${s.aluno.id}" data-key="${keyDate}">${alterado?'Editar alteração':'Remarcar hoje'}</button>
             ${alterado?`<button type="button" class="btn-del btn-desfazer" data-aluno="${s.aluno.id}" data-key="${keyDate}">Desfazer</button>`:''}
           </div>
@@ -609,6 +641,19 @@ function render(){
         btn.addEventListener('click', async ()=>{
           const exc = getExcecao(btn.dataset.aluno, btn.dataset.key);
           if(exc){ await deleteExcecao(exc.id); render(); }
+        });
+      });
+      main.querySelectorAll('.btn-realizada').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          btn.disabled = true;
+          try{
+            await toggleRealizada(btn.dataset.aluno, btn.dataset.data);
+            render();
+          }catch(err){
+            console.error('Erro ao marcar aula como dada:', err);
+            alert('Não consegui salvar: ' + (err.message||'tente novamente.'));
+            btn.disabled = false;
+          }
         });
       });
     }
