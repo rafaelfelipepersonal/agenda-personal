@@ -92,9 +92,10 @@
   /* FORMS */
   .field{margin-bottom:12px;}
   .field label{display:block; font-size:12px; color:var(--muted); margin-bottom:5px;}
-  .field input, .field select{width:100%; min-width:0; background:var(--surface-2); border:1px solid var(--line);
+  .field input:not([type="checkbox"]), .field select{width:100%; min-width:0; background:var(--surface-2); border:1px solid var(--line);
     color:var(--text); padding:11px 12px; border-radius:10px; font-family:inherit; font-size:14.5px;
     -webkit-appearance:none; appearance:none;}
+  .field input[type="checkbox"]{width:20px; height:20px; min-width:20px; accent-color:var(--lime); cursor:pointer;}
   .field input.time-mask{font-variant-numeric:tabular-nums; letter-spacing:0.5px;}
   .field input:focus, .field select:focus{outline:none; border-color:var(--lime);}
   .field-row{display:flex; gap:10px;}
