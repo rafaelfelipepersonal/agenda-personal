@@ -142,7 +142,9 @@
   nav.tabbar .tabwrap{max-width:480px; margin:0 auto; display:flex; width:100%;}
   nav.tabbar button{flex:1; background:none; border:none; color:var(--muted); font-family:inherit;
     font-size:11px; padding:6px 0; display:flex; flex-direction:column; align-items:center; gap:3px;}
-  nav.tabbar button .ic{font-size:19px;}
+  nav.tabbar button .ic{font-size:19px; width:24px; height:24px; display:flex; align-items:center; justify-content:center;}
+  nav.tabbar button .ic img{width:22px; height:22px; object-fit:contain; opacity:0.5; transition:opacity 0.2s;}
+  nav.tabbar button.active .ic img{opacity:1; filter:brightness(0) saturate(100%) invert(93%) sepia(55%) saturate(500%) hue-rotate(30deg) brightness(105%);}
   nav.tabbar button.active{color:var(--lime);}
 
   .setup-banner{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px;
@@ -186,11 +188,11 @@
 
 <nav class="tabbar">
   <div class="tabwrap">
-    <button class="tab-btn active" data-tab="agenda"><span class="ic">📅</span>Agenda</button>
-    <button class="tab-btn" data-tab="consulta"><span class="ic">🔍</span>Consulta</button>
-    <button class="tab-btn" data-tab="horarios"><span class="ic">🕒</span>Vagas</button>
-    <button class="tab-btn" data-tab="alunos"><span class="ic">🧍</span>Alunos</button>
-    <button class="tab-btn" data-tab="pagamentos"><span class="ic">💳</span>Pagamentos</button>
+    <button class="tab-btn active" data-tab="agenda"><span class="ic"><img src="agenda.png" alt="Agenda"></span>Agenda</button>
+    <button class="tab-btn" data-tab="consulta"><span class="ic"><img src="consulta.png" alt="Consulta"></span>Consulta</button>
+    <button class="tab-btn" data-tab="horarios"><span class="ic"><img src="vagas.png" alt="Vagas"></span>Vagas</button>
+    <button class="tab-btn" data-tab="alunos"><span class="ic"><img src="alunos.png" alt="Alunos"></span>Alunos</button>
+    <button class="tab-btn" data-tab="pagamentos"><span class="ic"><img src="pagamentos.png" alt="Pagamentos"></span>Pagamentos</button>
   </div>
 </nav>
 
