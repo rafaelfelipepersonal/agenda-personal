@@ -82,6 +82,9 @@
   .card.remarcada{border-color:#FFC13D; background:linear-gradient(180deg, rgba(255,193,61,0.08), var(--surface));}
   .card.cancelada{opacity:0.65; border-style:dashed;}
   .tachado{text-decoration:line-through; opacity:0.6;}
+  .card.inativo{opacity:0.7; border-style:dashed;}
+  .badge.inativo{background:var(--surface-2); color:var(--muted);}
+  .btn-reativar{background:rgba(201,255,61,0.18) !important; color:var(--lime) !important;}
   .card-actions{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;}
   .card-actions button{flex:1; min-width:110px; padding:9px; border-radius:9px; border:none; font-family:inherit;
     font-size:12.5px; font-weight:600;}
@@ -224,7 +227,7 @@ document.getElementById('setupBanner').style.display = usingFirebase ? 'none' : 
 
 /* ======================= STATE ======================= */
 const DIAS = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
-let alunos = []; // {id, nome, endereco, lat, lng, aulas:[{dia(0-6), horario('HH:MM'), duracaoMin}], valor, diaVencimento, ultimoPagamento}
+let alunos = []; // {id, nome, endereco, lat, lng, aulas:[{dia(0-6), horario('HH:MM'), duracaoMin}], valor, diaVencimento, ultimoPagamento, pagoAte, ativo, historicoPagamentos}
 let excecoes = []; // alterações pontuais: {id, alunoId, data:'YYYY-MM-DD', novoHorario:'HH:MM'|null, cancelada:bool, motivo}
 let realizadas = []; // aulas marcadas como dadas: {id, alunoId, data:'YYYY-MM-DD'}
 let currentTab = 'agenda';
@@ -313,8 +316,46 @@ async function deleteAluno(id){
   if(usingFirebase) await db.collection('alunos').doc(id).delete();
   alunos = alunos.filter(a=>a.id!==id);
 }
+async function desfazerPago(aluno){
+  const hist = Array.isArray(aluno.historicoPagamentos) ? [...aluno.historicoPagamentos] : [];
+  const ultimo = hist.pop();
+  if(ultimo){
+    aluno.historicoPagamentos = hist;
+    aluno.pagoAte = ultimo.anterior?.pagoAte ?? null;
+    aluno.ultimoPagamento = ultimo.anterior?.ultimoPagamento ?? null;
+  } else if(aluno.ultimoPagamento || aluno.pagoAte){
+    // Pagamento marcado antes de existir o histórico: volta um ciclo (ou zera, se não tinha 'pagoAte')
+    if(aluno.pagoAte){
+      const diaV = Number(aluno.diaVencimento||10);
+      const q = new Date(aluno.pagoAte+'T00:00:00');
+      aluno.pagoAte = dataISO(new Date(q.getFullYear(), q.getMonth()-1, diaV));
+    } else {
+      aluno.pagoAte = null;
+    }
+    aluno.ultimoPagamento = null;
+  } else {
+    return;
+  }
+  const salvouATempo = await Promise.race([
+    saveAluno(aluno).then(()=>true),
+    new Promise(resolve=>setTimeout(()=>resolve('timeout'), 10000))
+  ]);
+  if(salvouATempo==='timeout'){
+    throw new Error('Tempo esgotado ao salvar no Firestore (10s). Confira as regras de segurança do Firestore ou a conexão.');
+  }
+  render();
+}
 async function marcarPago(aluno){
-  aluno.ultimoPagamento = new Date().toISOString().slice(0,10);
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const vencQuitado = proximoVencimento(aluno); // o vencimento que está sendo pago agora (mesmo que seja adiantado)
+  const hist = Array.isArray(aluno.historicoPagamentos) ? [...aluno.historicoPagamentos] : [];
+  hist.push({
+    pagoEm: iso(new Date()), venc: iso(vencQuitado),
+    anterior: {pagoAte: aluno.pagoAte ?? null, ultimoPagamento: aluno.ultimoPagamento ?? null}
+  });
+  aluno.historicoPagamentos = hist;
+  aluno.ultimoPagamento = iso(new Date());
+  aluno.pagoAte = iso(vencQuitado);
   const salvouATempo = await Promise.race([
     saveAluno(aluno).then(()=>true),
     new Promise(resolve=>setTimeout(()=>resolve('timeout'), 10000))
@@ -414,9 +455,13 @@ function getAulas(aluno){
 // Retorna as sessões (aula + aluno) que caem num dia da semana específico, ordenadas por horário.
 // Versão "modelo" — ignora alterações pontuais; usada pela Consulta de disponibilidade,
 // que avalia o padrão semanal recorrente, não uma data específica.
+// Aluno inativo (pausou/cancelou por um tempo) não aparece na agenda, disponibilidade nem pagamentos.
+// Alunos antigos, sem o campo 'ativo', contam como ativos.
+function alunoAtivo(a){ return a.ativo !== false; }
+function alunosAtivos(){ return alunos.filter(alunoAtivo); }
 function sessoesTemplateDoDia(diaSemana){
   const out = [];
-  alunos.forEach(a=>{
+  alunosAtivos().forEach(a=>{
     getAulas(a).forEach(aula=>{
       if(aula.dia===diaSemana) out.push({aluno:a, horario:aula.horario, duracaoMin:aula.duracaoMin});
     });
@@ -444,7 +489,7 @@ function sessoesDoDia(date){
   const out = [];
 
   // 1) sessões regulares que caem nesse dia da semana, verificando se têm exceção com origem nessa mesma data
-  alunos.forEach(a=>{
+  alunosAtivos().forEach(a=>{
     getAulas(a).forEach(aula=>{
       if(aula.dia!==diaSemana) return;
       const exc = getExcecao(a.id, dataStr);
@@ -472,7 +517,7 @@ function sessoesDoDia(date){
   excecoes.forEach(exc=>{
     if(exc.cancelada || !exc.novaData || exc.novaData!==dataStr || exc.data===dataStr) return;
     const a = alunos.find(x=>x.id===exc.alunoId);
-    if(!a) return;
+    if(!a || !alunoAtivo(a)) return;
     out.push({
       aluno:a, horario: exc.novoHorario || exc.horarioOriginal, duracaoMin: exc.duracaoMin||60,
       horarioOriginal: exc.horarioOriginal, cancelada:false, remarcada:true, movida:false,
@@ -501,14 +546,21 @@ function horariosLivresDoDia(date, inicioMin, fimMin, minGap){
 function proximoVencimento(aluno){
   const hoje = new Date();
   const diaV = Number(aluno.diaVencimento||10);
-  let venc = new Date(hoje.getFullYear(), hoje.getMonth(), diaV);
-  const ultimo = aluno.ultimoPagamento ? new Date(aluno.ultimoPagamento+'T00:00:00') : null;
-  if(ultimo && ultimo.getMonth()===hoje.getMonth() && ultimo.getFullYear()===hoje.getFullYear() && ultimo.getDate()>=diaV-2){
-    venc = new Date(hoje.getFullYear(), hoje.getMonth()+1, diaV);
-  } else if(hoje.getDate() > diaV && !(ultimo && ultimo >= venc)){
-    // já passou o dia esse mês e não tem pagamento cobrindo -> está vencido esse mês mesmo
+  // Último vencimento já quitado (pode ser de pagamento adiantado)
+  let quitado = null;
+  if(aluno.pagoAte){
+    quitado = new Date(aluno.pagoAte+'T00:00:00');
+  } else if(aluno.ultimoPagamento){
+    // Compatibilidade com pagamentos antigos (sem 'pagoAte')
+    const u = new Date(aluno.ultimoPagamento+'T00:00:00');
+    quitado = u.getDate()>=diaV-2
+      ? new Date(u.getFullYear(), u.getMonth(), diaV)
+      : new Date(u.getFullYear(), u.getMonth()-1, diaV);
   }
-  return venc;
+  if(quitado){
+    return new Date(quitado.getFullYear(), quitado.getMonth()+1, diaV);
+  }
+  return new Date(hoje.getFullYear(), hoje.getMonth(), diaV);
 }
 function statusPagamento(aluno){
   const venc = proximoVencimento(aluno);
@@ -571,8 +623,10 @@ function render(){
 
   if(currentTab==='agenda'){
     heading.innerHTML = 'Agenda<span>.</span>';
-    if(!alunos.length){
-      main.innerHTML = '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
+    if(!alunosAtivos().length){
+      main.innerHTML = alunos.length
+        ? '<div class="empty-track">Nenhum aluno ativo no momento. Reative alguém na aba Alunos.</div>'
+        : '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
     } else {
       const agendaDate = getAgendaDate();
       const diaSemanaAtual = agendaDate.getDay();
@@ -734,24 +788,39 @@ function render(){
     if(!alunos.length){
       main.innerHTML = '<div class="empty-track">Nenhum aluno cadastrado ainda. Toque em + para adicionar.</div>';
     } else {
-      main.innerHTML = alunos.map(a=>{
+      const cardAluno = a=>{
+        const ativo = alunoAtivo(a);
         const aulas = getAulas(a).slice().sort((x,y)=> x.dia-y.dia || horaParaMinutos(x.horario)-horaParaMinutos(y.horario));
         const resumo = aulas.length
           ? aulas.map(x=>`${DIAS[x.dia].slice(0,3)} ${x.horario}`).join(' · ')
           : 'sem aula cadastrada';
         return `
-        <div class="card">
+        <div class="card ${ativo?'':'inativo'}">
           <div class="row">
             <div><div class="aluno-nome">${a.nome}</div>
             <div class="aluno-meta">${resumo}</div>
             <div class="aluno-meta">${a.endereco||'sem endereço'}</div></div>
+            ${ativo?'':'<span class="badge inativo">Inativo</span>'}
           </div>
           <div class="card-actions">
             <button class="btn-ghost btn-editar-aluno" data-id="${a.id}">Editar</button>
+            ${ativo
+              ? `<button class="btn-ghost btn-inativar-aluno" data-id="${a.id}">Inativar</button>`
+              : `<button class="btn-reativar btn-reativar-aluno" data-id="${a.id}">Reativar</button>`}
             <button class="btn-del btn-excluir-aluno" data-id="${a.id}">Excluir</button>
           </div>
         </div>`;
-      }).join('');
+      };
+      const ativos = alunos.filter(alunoAtivo);
+      const inativos = alunos.filter(a=>!alunoAtivo(a));
+      main.innerHTML = ativos.map(cardAluno).join('')
+        + (inativos.length ? `<div class="section-title">Inativos (${inativos.length})</div>` + inativos.map(cardAluno).join('') : '');
+      main.querySelectorAll('.btn-inativar-aluno').forEach(btn=>{
+        btn.addEventListener('click', ()=> alterarAtivoAluno(btn.dataset.id, false, btn));
+      });
+      main.querySelectorAll('.btn-reativar-aluno').forEach(btn=>{
+        btn.addEventListener('click', ()=> alterarAtivoAluno(btn.dataset.id, true, btn));
+      });
       main.querySelectorAll('.btn-editar-aluno').forEach(btn=>{
         btn.addEventListener('click', ()=> openForm(btn.dataset.id));
       });
@@ -784,20 +853,22 @@ function render(){
 
   if(currentTab==='pagamentos'){
     heading.innerHTML = 'Pagamentos<span>.</span>';
-    if(!alunos.length){
+    if(!alunosAtivos().length){
       main.innerHTML = '<div class="empty-track">Cadastre alunos para acompanhar pagamentos.</div>';
     } else {
-      const ordenados = [...alunos].sort((a,b)=>proximoVencimento(a)-proximoVencimento(b));
+      const ordenados = [...alunosAtivos()].sort((a,b)=>proximoVencimento(a)-proximoVencimento(b));
       main.innerHTML = ordenados.map(a=>{
         const st = statusPagamento(a);
         return `<div class="card ${st.cls==='late'?'overdue':''}">
           <div class="row">
             <div><div class="aluno-nome">${a.nome}</div>
-            <div class="aluno-meta">R$ ${Number(a.valor||0).toFixed(2)} · vencimento dia ${a.diaVencimento||10}</div></div>
+            <div class="aluno-meta">R$ ${Number(a.valor||0).toFixed(2)} · vencimento dia ${a.diaVencimento||10}</div>
+            ${a.ultimoPagamento ? `<div class="aluno-meta">Último pagamento: ${new Date(a.ultimoPagamento+'T00:00:00').toLocaleDateString('pt-BR')}</div>` : ''}</div>
             <span class="badge ${st.cls}">${st.label}</span>
           </div>
           <div class="card-actions">
             <button class="btn-lime" onclick="handleMarcarPago('${a.id}', this)">Marcar como pago</button>
+            ${((a.historicoPagamentos||[]).length || a.ultimoPagamento) ? `<button class="btn-ghost" onclick="handleDesfazerPago('${a.id}', this)">Desfazer último pagamento</button>` : ''}
           </div>
         </div>`;
       }).join('');
@@ -907,6 +978,36 @@ window.handleConsultaCheck = async function(){
   btn.disabled = false;
 };
 
+window.alterarAtivoAluno = async function(id, ativo, btn){
+  const aluno = alunos.find(a=>a.id===id);
+  if(!aluno) return;
+  if(btn){ btn.disabled = true; btn.textContent = ativo ? 'Reativando...' : 'Inativando...'; }
+  const copia = {...aluno, ativo};
+  if(ativo){
+    // Ao voltar, a cobrança recomeça do próximo vencimento (não cobra os meses em que ficou parado)
+    const hoje = new Date();
+    const diaV = Number(aluno.diaVencimento||10);
+    const proximo = hoje.getDate() <= diaV
+      ? new Date(hoje.getFullYear(), hoje.getMonth(), diaV)
+      : new Date(hoje.getFullYear(), hoje.getMonth()+1, diaV);
+    const anterior = new Date(proximo.getFullYear(), proximo.getMonth()-1, diaV);
+    copia.pagoAte = dataISO(anterior);
+    copia.historicoPagamentos = [];
+  }
+  try{
+    const salvouATempo = await Promise.race([
+      saveAluno(copia).then(()=>true),
+      new Promise(resolve=>setTimeout(()=>resolve('timeout'), 10000))
+    ]);
+    if(salvouATempo==='timeout') throw new Error('Tempo esgotado ao salvar. Confira a conexão.');
+    render();
+  }catch(err){
+    console.error('Erro ao alterar status do aluno:', err);
+    alert('Não consegui salvar: ' + (err.message||'tente novamente.'));
+    render();
+  }
+};
+
 window.confirmarExclusaoAluno = function(id){
   const aluno = alunos.find(a=>a.id===id);
   if(!aluno) return;
@@ -948,6 +1049,24 @@ window.handleMarcarPago = async (id, btn)=>{
     console.error('Erro ao marcar como pago:', err);
     alert('Não consegui marcar como pago: ' + (err.message||'tente novamente.'));
     if(btn){ btn.disabled = false; btn.textContent = 'Marcar como pago'; }
+  }
+};
+
+window.handleDesfazerPago = async (id, btn)=>{
+  const a = alunos.find(x=>x.id===id);
+  if(!a) return;
+  const ult = (a.historicoPagamentos||[]).slice(-1)[0];
+  const dataRef = ult ? ult.pagoEm : a.ultimoPagamento;
+  if(!dataRef) return;
+  const dataPg = new Date(dataRef+'T00:00:00').toLocaleDateString('pt-BR');
+  if(!confirm(`Desfazer o pagamento de ${a.nome} marcado em ${dataPg}?`)) return;
+  if(btn){ btn.disabled = true; btn.textContent = 'Desfazendo...'; }
+  try{
+    await desfazerPago(a);
+  }catch(err){
+    console.error('Erro ao desfazer pagamento:', err);
+    alert('Não consegui desfazer: ' + (err.message||'tente novamente.'));
+    render();
   }
 };
 
@@ -1145,6 +1264,9 @@ window.openForm = function(id){
       diaVencimento: document.getElementById('f_vencimento').value,
       lat: aluno?.lat, lng: aluno?.lng,
       ultimoPagamento: aluno?.ultimoPagamento || null,
+      pagoAte: aluno?.pagoAte || null,
+      ativo: aluno ? alunoAtivo(aluno) : true,
+      historicoPagamentos: aluno?.historicoPagamentos || [],
     };
     if(!novo.nome){
       statusEl.textContent = 'Preencha o nome do aluno.'; statusEl.className='status-line err'; return;
